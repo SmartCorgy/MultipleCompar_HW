@@ -1,0 +1,133 @@
+---
+title: "MultComp_HW"
+author: "Ekaterina Fokina"
+date: "2022-11-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Libraries
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(dplyr)
+library(plotrix)
+library(rstatix)
+library(ggplot2)
+library(DescTools)
+library(tibble)
+```
+
+# Data import
+
+```{r}
+soccer_general <- read.csv("soccer.csv", sep=";")[, 2:6] %>% 
+    mutate(Position = as.factor(Position), 
+    Nationality = as.factor(Nationality), 
+    Age = as.numeric(Age), 
+    Height = as.numeric(Height)
+) %>% 
+filter(Nationality %in% c("Spanish", "Italian", "German", "English", "Argentinian")) 
+
+
+
+set.seed(1) 
+
+
+
+soccer_wrk <- soccer_general[sample(1:nrow(soccer_general), 150), ] %>% 
+    mutate(Nationality = factor(Nationality))
+```
+
+# Построим доверительные интервалы для разниц средних (без поправок)
+
+(прим. авт. - далее будет очень грузный метод рисования ДИ. Я уверена, что это можно сделать проще через цикл, но у меня не получилось(()
+```{r}
+wider_soccer <- soccer_wrk %>% pivot_wider(names_from = Position, values_from = Height)
+
+DF <- as.data.frame(MeanDiffCI(wider_soccer$Defender, wider_soccer$Forward, na.rm = TRUE))
+
+DG <- MeanDiffCI(wider_soccer$Defender, wider_soccer$Goalkeeper, na.rm = TRUE) %>% as.data.frame() %>% rename("DtoG" = ".")
+
+DM <- MeanDiffCI(wider_soccer$Defender, wider_soccer$Midfielder, na.rm = TRUE) %>% as.data.frame() %>% rename("DtoM" = ".")
+
+FG <- MeanDiffCI(wider_soccer$Forward, wider_soccer$Goalkeeper, na.rm = TRUE) %>% as.data.frame() %>% rename("FtoG" = ".")
+
+FM <- MeanDiffCI(wider_soccer$Forward, wider_soccer$Midfielder, na.rm = TRUE) %>% as.data.frame() %>% rename("FtoM" = ".")
+
+GM <- MeanDiffCI(wider_soccer$Goalkeeper, wider_soccer$Midfielder, na.rm = TRUE) %>% as.data.frame() %>% rename("GtoM" = ".")
+
+DF %>% rename("DtoF" = "MeanDiffCI(wider_soccer$Defender, wider_soccer$Forward, na.rm = TRUE)") %>% bind_cols(DG) %>% bind_cols(DM) %>% bind_cols(FG) %>% bind_cols(FM) %>% bind_cols(GM) %>% t() %>% as.data.frame() %>% rownames_to_column("comparison") %>% ggplot(aes(comparison, meandiff)) + 
+  geom_point() +
+  geom_errorbar(aes(ymin = lwr.ci, ymax = upr.ci)) +
+  labs(x = "сравниваемые группы", y = "95% ДИ для разницы средних") +
+  coord_flip()
+
+
+
+```
+
+Из графика разниц средних видно, что в трех парах ДИ не пересекает 0 - это свидетельствует о том, что в этих парах есть разница в росте. Эти пары: Вратарь-Полузащитник, Вратарь-Нападающий, Защитник-Вратарь. По положению ДИ относительно 0 видно, что Вратари везде выше.
+
+# Построим ДИ для попарных разниц средних, но с поправкой Бонферрони
+
+```{r}
+
+CIadj <- 1 - 0.05/6
+
+DF <- as.data.frame(MeanDiffCI(wider_soccer$Defender, wider_soccer$Forward, na.rm = TRUE, conf.level = CIadj))
+
+DG <- MeanDiffCI(wider_soccer$Defender, wider_soccer$Goalkeeper, na.rm = TRUE, conf.level = CIadj) %>% as.data.frame() %>% rename("DtoG" = ".")
+
+DM <- MeanDiffCI(wider_soccer$Defender, wider_soccer$Midfielder, na.rm = TRUE, conf.level = CIadj) %>% as.data.frame() %>% rename("DtoM" = ".")
+
+FG <- MeanDiffCI(wider_soccer$Forward, wider_soccer$Goalkeeper, na.rm = TRUE, conf.level = CIadj) %>% as.data.frame() %>% rename("FtoG" = ".")
+
+FM <- MeanDiffCI(wider_soccer$Forward, wider_soccer$Midfielder, na.rm = TRUE, conf.level = CIadj) %>% as.data.frame() %>% rename("FtoM" = ".")
+
+GM <- MeanDiffCI(wider_soccer$Goalkeeper, wider_soccer$Midfielder, na.rm = TRUE, conf.level = CIadj) %>% as.data.frame() %>% rename("GtoM" = ".")
+
+DF %>% rename("DtoF" = "MeanDiffCI(wider_soccer$Defender, wider_soccer$Forward, na.rm = TRUE, conf.level = CIadj)") %>% bind_cols(DG) %>% bind_cols(DM) %>% bind_cols(FG) %>% bind_cols(FM) %>% bind_cols(GM) %>% t() %>% as.data.frame() %>% rownames_to_column("comparison") %>% ggplot(aes(comparison, meandiff)) + 
+  geom_point() +
+  geom_errorbar(aes(ymin = lwr.ci, ymax = upr.ci)) +
+  labs(x = "сравниваемые группы", y = "95% ДИ для разницы средних") +
+  coord_flip()
+
+```
+
+Мы поправили ДИ с учетом количества сравнений, ДИ стали шире и в некоторых парах с вратарями они могли "дотянуться" до нуля и исключить открытие. Но ДИ до нуля не дотянулись, так что вратари все еще выше всех остальных, даже с поправкой по Бонферрони.
+
+# Проведем тесты с и без поправок
+```{r}
+stat.test <- soccer_wrk %>%
+  t_test(Height ~ Position) %>%
+  adjust_pvalue(method = "holm") %>%
+  add_significance() %>% rename("p.adj.Holm" = "p.adj", "p.adj.signif.Holm" = "p.adj.signif")
+
+stat.test_BH <- soccer_wrk %>%
+  t_test(Height ~ Position) %>%
+  adjust_pvalue(method = "BH") %>%
+  add_significance() %>% select(p.adj, p.adj.signif) %>% rename("p.adj.BH" = "p.adj", "p.adj.signif.BH" = "p.adj.signif")
+
+stat.test %>% bind_cols(stat.test_BH)
+```
+
+Приятная табличка подтверждает то, что мы увидели своими глазами на предыдущих графиках: значимые отличия остались в тех же парах с вратарями, однако видно, как изменяется p-value в зависимости от не-/применения разных поправок. Причем заметно, что поправка Бенджамини-Хохберга работает мягче, чем Холм.
+
+# Bonus tibbles
+
+```{r}
+
+as.tibble(pairwise.t.test(soccer_wrk$Height, soccer_wrk$Position, p.adjust.method = "none")$p.value)
+
+as.tibble(pairwise.t.test(soccer_wrk$Height, soccer_wrk$Position, p.adjust.method = "holm")$p.value)
+
+as.tibble(pairwise.t.test(soccer_wrk$Height, soccer_wrk$Position, p.adjust.method = "BH")$p.value)
+
+
+```
+
+Примерно то же самое, что и в предыдущем чанке, но просто три таблички с p-value, поправленными разными способами.

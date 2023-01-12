@@ -1,0 +1,78 @@
+---
+title: "ANOVA_HW"
+author: "Ekaterina Fokina"
+date: "2023-01-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Libraries
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(dplyr)
+library(multcomp)
+```
+
+# Data import
+
+```{r}
+soccer_general <- read.csv("soccer.csv", sep=";")[, 2:6] %>% 
+    mutate(Position = as.factor(Position), 
+    Nationality = as.factor(Nationality), 
+    Age = as.numeric(Age), 
+    Height = as.numeric(Height)
+) %>% 
+filter(Nationality %in% c("Spanish", "Italian", "German", "English", "Argentinian")) 
+
+set.seed(1) 
+
+soccer_wrk <- soccer_general[sample(1:nrow(soccer_general), 150), ] %>% 
+    mutate(Nationality = factor(Nationality))
+```
+
+# ANOVA
+
+```{r}
+aov(Height ~ Position, data = soccer_wrk) %>% summary
+```
+Из полученных результатов видно, что позиция на поле несет информацию о росте футболистов (но не дает информацию о том, какая именно позиция)
+
+# HBW procedure
+
+```{r}
+m0 <- lm(Height ~ Position, data = soccer_wrk)
+HBW.comp <- m0 %>%  glht(linfct = mcp(Position = "Tukey"))
+
+HBW.comp %>% summary
+HBW.comp %>% confint()
+
+par(mar = c(5, 10, 4, 2)+0.1)
+HBW.comp %>% plot(xlab = "Height difference (cm)")
+```
+
+Из данных и графика следует, что значимо рост отличается в парах Вратарь-Защитник, Вратарь-Нападающий, Полузащитник-Вратарь.
+Причем ясно, что Вратари во всех парах выше.
+
+А еще следует, что полученные в предыдущей домашке результаты, кажется, верны. Даже графики совпадают (на самом деле они отзеркалены в моем случае). *Это вселяет надежду, потому что в прошлой домашке я была уверена, что что-то сделала не так*
+
+# Nationality issues
+
+```{r}
+aov(Height ~ Nationality, data = soccer_wrk) %>% summary
+
+m0.nat <- lm(Height ~ Nationality, data = soccer_wrk)
+HBW.comp.nat <- m0.nat %>%  glht(linfct = mcp(Nationality = "Tukey"))
+
+HBW.comp.nat %>% summary
+HBW.comp.nat %>% confint()
+
+par(mar = c(5, 10, 4, 2)+0.1)
+HBW.comp.nat %>% plot(xlab = "Height difference (cm)")
+```
+
+Из результатов дисперсионного анализа видно, что p = 0.437, что свидетельствует о том, что национальность не несет информации о росте футболистов. 
+Проведенный далее постхок анализ подтвердил это предположение (это видно из значений p-value и из графика разностей средних с ДИ: ДИ во всех парах пересекает 0)
